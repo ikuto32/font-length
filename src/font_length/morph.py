@@ -18,11 +18,29 @@ _NEIGHBORS = [
 ]
 
 
+def _is_valid_neighbor(skel: np.ndarray, y: int, x: int, ny: int, nx: int) -> bool:
+    if not (0 <= ny < skel.shape[0] and 0 <= nx < skel.shape[1]):
+        return False
+    if not skel[ny, nx]:
+        return False
+    dy = ny - y
+    dx = nx - x
+    if abs(dy) == 1 and abs(dx) == 1:
+        if skel[y, nx] or skel[ny, x]:
+            return False
+    return True
+
+
 def _compute_degree(skel: np.ndarray) -> np.ndarray:
-    padded = np.pad(skel.astype(np.uint8), 1, mode="constant", constant_values=0)
     degree = np.zeros_like(skel, dtype=np.uint8)
-    for dy, dx in _NEIGHBORS:
-        degree += padded[1 + dy : 1 + dy + skel.shape[0], 1 + dx : 1 + dx + skel.shape[1]]
+    coords = np.argwhere(skel)
+    for y, x in coords:
+        count = 0
+        for dy, dx in _NEIGHBORS:
+            ny, nx = int(y + dy), int(x + dx)
+            if _is_valid_neighbor(skel, int(y), int(x), ny, nx):
+                count += 1
+        degree[int(y), int(x)] = count
     return degree
 
 
@@ -31,55 +49,68 @@ def _prune_spurs(skel: np.ndarray, max_len: int) -> np.ndarray:
         return skel
 
     work = skel.copy()
-    changed = True
-    while changed:
-        changed = False
-        degree = _compute_degree(work)
-        endpoints = np.argwhere((work) & (degree == 1))
-        to_clear: set[tuple[int, int]] = set()
+    degree = _compute_degree(work)
+    endpoints = np.argwhere((work) & (degree == 1))
+    to_clear: set[tuple[int, int]] = set()
 
-        for y, x in endpoints:
-            path: list[tuple[int, int]] = []
-            current = (int(y), int(x))
-            prev: tuple[int, int] | None = None
-            steps = 0
-            keep_path = True
+    for y, x in endpoints:
+        path: list[tuple[int, int]] = []
+        current = (int(y), int(x))
+        prev: tuple[int, int] | None = None
+        steps = 0
+        branch_detected = False
 
-            while True:
-                path.append(current)
-                cy, cx = current
-                neighbors = []
-                for dy, dx in _NEIGHBORS:
-                    ny, nx = cy + dy, cx + dx
-                    if 0 <= ny < work.shape[0] and 0 <= nx < work.shape[1]:
-                        if work[ny, nx] and (prev is None or (ny, nx) != prev):
-                            neighbors.append((ny, nx))
-                if not neighbors:
-                    break
+        while steps < max_len:
+            path.append(current)
+            cy, cx = current
+            neighbors = []
+            for dy, dx in _NEIGHBORS:
+                ny, nx = cy + dy, cx + dx
+                if not _is_valid_neighbor(work, cy, cx, ny, nx):
+                    continue
+                if prev is not None and (ny, nx) == prev:
+                    continue
+                neighbors.append((ny, nx))
 
-                next_pixel = neighbors[0]
-                steps += 1
-                prev = current
-                current = next_pixel
+            if not neighbors:
+                break
 
-                if steps > max_len:
-                    keep_path = False
-                    break
+            next_pixel = neighbors[0]
+            dy = next_pixel[0] - cy
+            dx = next_pixel[1] - cx
 
-                deg = degree[current]
-                if deg >= 3:
-                    keep_path = False
-                    break
-                if deg <= 1:
-                    break
+            next_neighbors = []
+            for dy2, dx2 in _NEIGHBORS:
+                ny2, nx2 = next_pixel[0] + dy2, next_pixel[1] + dx2
+                if not _is_valid_neighbor(work, next_pixel[0], next_pixel[1], ny2, nx2):
+                    continue
+                if (ny2, nx2) == (cy, cx):
+                    continue
+                next_neighbors.append((ny2, nx2))
 
-            if keep_path and path:
-                to_clear.update(path)
+            if degree[next_pixel] >= 3:
+                branch_detected = True
+            else:
+                for ny2, nx2 in next_neighbors:
+                    dy2 = ny2 - next_pixel[0]
+                    dx2 = nx2 - next_pixel[1]
+                    if (dy2, dx2) != (dy, dx):
+                        branch_detected = True
+                        break
 
-        if to_clear:
-            for y, x in to_clear:
-                work[y, x] = False
-            changed = True
+            prev = current
+            current = next_pixel
+            steps += 1
+
+            if not next_neighbors:
+                break
+
+        if branch_detected and path:
+            to_clear.update(path)
+
+    if to_clear:
+        for y, x in to_clear:
+            work[y, x] = False
 
     return work
 
