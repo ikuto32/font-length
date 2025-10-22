@@ -51,10 +51,23 @@ def skeleton_to_polylines(skel: np.ndarray) -> list[list[Point]]:
         return []
 
     coord_set = set(coordinates)
-    degree = {
-        pixel: sum((neighbor in coord_set) for neighbor in _iter_neighbors(skel.shape, pixel))
+    def _is_valid_neighbor(pixel: Pixel, neighbor: Pixel) -> bool:
+        if neighbor not in coord_set:
+            return False
+        dy = neighbor[0] - pixel[0]
+        dx = neighbor[1] - pixel[1]
+        if abs(dy) == 1 and abs(dx) == 1:
+            intermediate_a = (pixel[0], neighbor[1])
+            intermediate_b = (neighbor[0], pixel[1])
+            if intermediate_a in coord_set or intermediate_b in coord_set:
+                return False
+        return True
+
+    neighbor_map: dict[Pixel, list[Pixel]] = {
+        pixel: [n for n in _iter_neighbors(skel.shape, pixel) if _is_valid_neighbor(pixel, n)]
         for pixel in coordinates
     }
+    degree = {pixel: len(neighbors) for pixel, neighbors in neighbor_map.items()}
 
     polylines: list[list[Point]] = []
     visited_edges: set[tuple[Pixel, Pixel]] = set()
@@ -63,43 +76,45 @@ def skeleton_to_polylines(skel: np.ndarray) -> list[list[Point]]:
         edge = _edge(start, first_neighbor)
         if edge in visited_edges:
             return
-        visited_edges.add(edge)
 
-        path: list[Pixel] = [start, first_neighbor]
+        path: list[Pixel] = [start]
         prev = start
         current = first_neighbor
 
         while True:
-            deg = degree.get(current, 0)
-            neighbors = [n for n in _iter_neighbors(skel.shape, current) if n in coord_set and n != prev]
+            path.append(current)
+            visited_edges.add(_edge(prev, current))
+
+            neighbors = [n for n in neighbor_map.get(current, []) if n != prev]
             if not neighbors:
                 break
-            if deg != 2:
+
+            if degree.get(current, 0) != 2:
                 break
+
             nxt = neighbors[0]
-            edge = _edge(current, nxt)
-            if edge in visited_edges:
+            if _edge(current, nxt) in visited_edges:
                 break
-            visited_edges.add(edge)
             if nxt == start:
                 path.append(nxt)
+                visited_edges.add(_edge(current, nxt))
                 break
-            path.append(nxt)
+
             prev, current = current, nxt
 
         if len(path) >= 2:
             polylines.append([_pixel_to_point(p) for p in path])
 
-    for pixel in coordinates:
-        if degree.get(pixel, 0) != 2:
-            for neighbor in _iter_neighbors(skel.shape, pixel):
-                if neighbor in coord_set:
-                    trace_path(pixel, neighbor)
+    # Trace from endpoints first to ensure branches are covered in a single pass.
+    for pixel, neighbors in neighbor_map.items():
+        if degree.get(pixel, 0) == 1:
+            neighbor = neighbors[0]
+            trace_path(pixel, neighbor)
 
-    for pixel in coordinates:
-        for neighbor in _iter_neighbors(skel.shape, pixel):
-            if neighbor in coord_set:
-                trace_path(pixel, neighbor)
+    # Trace any remaining edges, including closed loops.
+    for pixel, neighbors in neighbor_map.items():
+        for neighbor in neighbors:
+            trace_path(pixel, neighbor)
 
     return polylines
 
