@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "font-length"
+version = "0.1.0"
+description = "Convert OpenType fonts to single-line SVG approximations and measure stroke lengths"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "OpenAI", email = "example@example.com"}]
+dependencies = [
+    "numpy",
+    "Pillow",
+    "requests",
+    "scikit-image",
+    "pydantic>=2",
+    "PyYAML",
+    "tqdm",
+]
+
+[project.scripts]
+joyo2svg = "font_length.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
